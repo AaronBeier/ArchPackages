@@ -1,0 +1,53 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Prepare System
+        run: |
+          pacman -Syu --noconfirm git github-cli
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+      - name: Clone Repo
+        uses: actions/checkout@v7
+
+      - name: Build Packages
+        run: |
+          chown -R builder .
+          mkdir -p out
+          for dir in */; do
+            [ -f "$dir/PKGBUILD" ] || continue
+            (cd "$dir" && sudo -u builder makepkg -s --noconfirm)
+            mv "$dir"/*.pkg.tar.zst out/
+          done
+
+      - name: Create Repo Database
+        run: |
+          cd out
+          repo-add archpackages.db.tar.zst *.pkg.tar.zst
+          rm archpackages.db archpackages.files
+          cp archpackages.db.tar.zst archpackages.db
+          cp archpackages.files.tar.zst archpackages.files
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete repo --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create repo out/* --title "Package Repo" --notes "Built from ${GITHUB_SHA}" --repo "$GITHUB_REPOSITORY"

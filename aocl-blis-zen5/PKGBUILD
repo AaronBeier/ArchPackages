@@ -6,7 +6,7 @@ arch=(x86_64)
 url='https://github.com/amd/blis'
 license=(BSD-3-Clause)
 depends=(gcc-libs glibc)
-makedepends=(cmake git python)
+makedepends=(cmake gcc-fortran git python)
 provides=(libblis-mt.so)
 conflicts=(blis)
 source=('git+https://github.com/amd/blis#branch=dev')

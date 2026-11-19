@@ -1,0 +1,51 @@
+pkgname=aocl-blis-zen5
+pkgver=5.3.2.r0.g0000000
+pkgrel=1
+pkgdesc='AMD BLIS (dev branch) built for Zen 5, OpenMP threaded, with CBLAS and aocl_gemm'
+arch=(x86_64)
+url='https://github.com/amd/blis'
+license=(BSD-3-Clause)
+depends=(gcc-libs glibc)
+makedepends=(cmake git python)
+provides=(libblis-mt.so)
+conflicts=(blis)
+source=('git+https://github.com/amd/blis#branch=dev')
+sha256sums=(SKIP)
+options=(!debug !lto)
+
+pkgver() {
+  cd blis
+  printf '%s.r%s.g%s' "$(tr - _ < version)" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd blis
+
+  # idk if this is still needed, just copied it from my local build script
+  grep -rlF '#if !defined(__clang__) && defined(__GNUC__) && __GNUC__ == 15' . | xargs -r sed -i 's/__GNUC__ == 15/__GNUC__ >= 15/'
+}
+
+build() {
+  CFLAGS+=' -march=znver5 -mtune=znver5'
+  CXXFLAGS+=' -march=znver5 -mtune=znver5'
+
+  cmake -S blis -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBLIS_CONFIG_FAMILY=zen5 \
+    -DENABLE_CBLAS=ON \
+    -DENABLE_THREADING=openmp \
+    -DENABLE_ADDON=aocl_gemm \
+    -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_STATIC_LIBS=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -d "$pkgdir/usr/include/blis"
+  find "$pkgdir/usr/include" -maxdepth 1 -type f -exec mv -t "$pkgdir/usr/include/blis" {} +
+
+  install -Dm644 blis/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}

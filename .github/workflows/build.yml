@@ -16,8 +16,20 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    container:
+      image: archlinux:base-devel
+      # mount these so we can delete them for more disk space
+      options: >-
+        -v /usr/share/dotnet:/host/dotnet
+        -v /usr/local/lib/android:/host/android
+        -v /opt/ghc:/host/ghc
+        -v /opt/hostedtoolcache:/host/toolcache
     steps:
+      - name: Free Disk Space
+        run: |
+          rm -rf /host/dotnet/* /host/android/* /host/ghc/* /host/toolcache/*
+          df -h /
+
       - name: Prepare System
         run: |
           pacman -Syu --noconfirm git github-cli
@@ -32,16 +44,23 @@ jobs:
         run: |
           chown -R builder .
           mkdir -p out
+
           for dir in */; do
             [ -f "$dir/PKGBUILD" ] || continue
-            (cd "$dir" && sudo -u builder makepkg -s --noconfirm)
+            (cd "$dir" && sudo -u builder makepkg -s -r -c --noconfirm)
+
             mv "$dir"/*.pkg.tar.zst out/
+            repo-add out/archpackages.db.tar.zst out/*.pkg.tar.zst
+
+            grep -q '^\[archpackages\]' /etc/pacman.conf || printf '\n[archpackages]\nSigLevel = Optional TrustAll\nServer = file://%s/out\n' "$PWD" >> /etc/pacman.conf
+            pacman -Sy --noconfirm
+            
+            rm -f /var/cache/pacman/pkg/*
           done
 
       - name: Create Repo Database
         run: |
           cd out
-          repo-add archpackages.db.tar.zst *.pkg.tar.zst
           rm archpackages.db archpackages.files
           cp archpackages.db.tar.zst archpackages.db
           cp archpackages.files.tar.zst archpackages.files

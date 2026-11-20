@@ -1,0 +1,25 @@
+pkgname=cactus-bin
+pkgver=4.1.4
+pkgrel=1
+pkgdesc='Cactus runtime (prebuilt)'
+arch=(x86_64)
+url='https://github.com/cactus-compute/cactus'
+license=(Apache-2.0)
+depends=(glibc)
+provides=("cactus=$pkgver" libcactus.so)
+conflicts=(cactus)
+options=(!debug !strip)
+source=("cactus-cli-$pkgver::https://huggingface.co/Cactus-Compute/cactus/resolve/f4ab2741203a282c6e7b89983de2b5e5b2e805a8/releases/$pkgver/linux-x86_64/cactus" "libcactus-$pkgver.a::https://huggingface.co/Cactus-Compute/cactus/resolve/f4ab2741203a282c6e7b89983de2b5e5b2e805a8/releases/$pkgver/linux-x86_64/cactus/linux-x86_64/libcactus.a" "cactus-$pkgver.h::https://huggingface.co/Cactus-Compute/cactus/resolve/f4ab2741203a282c6e7b89983de2b5e5b2e805a8/releases/$pkgver/linux-x86_64/cactus/linux-x86_64/cactus.h" "cactus_runtime-$pkgver.whl::https://huggingface.co/Cactus-Compute/cactus/resolve/f4ab2741203a282c6e7b89983de2b5e5b2e805a8/releases/$pkgver/linux-x86_64/cactus/python/cactus_runtime-$pkgver-py3-none-manylinux2014_x86_64.whl")
+noextract=("libcactus-$pkgver.a" "cactus_runtime-$pkgver.whl")
+sha256sums=(SKIP SKIP SKIP SKIP)
+
+prepare() {
+  bsdtar -xf "cactus_runtime-$pkgver.whl" cactus/libcactus.so
+}
+
+package() {
+  install -Dm755 "cactus-cli-$pkgver" "$pkgdir/usr/bin/cactus"
+  install -Dm755 cactus/libcactus.so -t "$pkgdir/usr/lib"
+  install -Dm644 "libcactus-$pkgver.a" "$pkgdir/usr/lib/libcactus.a"
+  install -Dm644 "cactus-$pkgver.h" "$pkgdir/usr/include/cactus.h"
+}

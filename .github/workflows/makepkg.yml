@@ -1,0 +1,73 @@
+name: makepkg
+on:
+  workflow_call:
+    inputs:
+      package:
+        required: true
+        type: string
+      deps:
+        required: false
+        type: string
+        default: ''
+      free-disk:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  makepkg:
+    name: ${{ inputs.package }}
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+      # mount these so we can delete them for more disk space (if free-disk is set)
+      options: >-
+        -v /usr/share/dotnet:/host/dotnet
+        -v /usr/local/lib/android:/host/android
+        -v /opt/ghc:/host/ghc
+        -v /opt/hostedtoolcache:/host/toolcache
+    steps:
+      - name: Free Disk Space
+        if: inputs.free-disk
+        run: |
+          rm -rf /host/dotnet/* /host/android/* /host/ghc/* /host/toolcache/*
+          df -h /
+
+      - name: Prepare System
+        run: |
+          pacman -Syu --noconfirm git
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
+
+      - name: Clone Repo
+        uses: actions/checkout@v7
+
+      - name: Download In-Repo Dependencies
+        if: inputs.deps != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pkg-${{ inputs.deps }}
+          path: /localrepo
+          merge-multiple: true
+
+      - name: Add Local Repo
+        if: inputs.deps != ''
+        run: |
+          repo-add /localrepo/localrepo.db.tar.zst /localrepo/*.pkg.tar.zst
+          printf '\n[localrepo]\nSigLevel = Optional TrustAll\nServer = file:///localrepo\n' >> /etc/pacman.conf
+          pacman -Sy --noconfirm
+
+      - name: Build Package
+        run: |
+          chown -R builder .
+          cd '${{ inputs.package }}'
+          sudo -u builder makepkg -s --noconfirm
+
+      - name: Upload Package
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-${{ inputs.package }}
+          path: ${{ inputs.package }}/*.pkg.tar.zst
+          if-no-files-found: error
+          compression-level: 0

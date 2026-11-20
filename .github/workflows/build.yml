@@ -7,7 +7,7 @@ on:
     - cron: '0 4 * * 1'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build
@@ -15,52 +15,53 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:base-devel
-      # mount these so we can delete them for more disk space
-      options: >-
-        -v /usr/share/dotnet:/host/dotnet
-        -v /usr/local/lib/android:/host/android
-        -v /opt/ghc:/host/ghc
-        -v /opt/hostedtoolcache:/host/toolcache
-    steps:
-      - name: Free Disk Space
-        run: |
-          rm -rf /host/dotnet/* /host/android/* /host/ghc/* /host/toolcache/*
-          df -h /
-
-      - name: Prepare System
-        run: |
-          pacman -Syu --noconfirm git github-cli
-          useradd -m builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
-          echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
-
-      - name: Clone Repo
-        uses: actions/checkout@v7
-
-      - name: Build Packages
-        run: |
-          chown -R builder .
-          mkdir -p out
-
-          for dir in */; do
-            [ -f "$dir/PKGBUILD" ] || continue
-            (cd "$dir" && sudo -u builder makepkg -s -r -c --noconfirm)
-
-            mv "$dir"/*.pkg.tar.zst out/
-            repo-add out/archpackages.db.tar.zst out/*.pkg.tar.zst
-
-            grep -q '^\[archpackages\]' /etc/pacman.conf || printf '\n[archpackages]\nSigLevel = Optional TrustAll\nServer = file://%s/out\n' "$PWD" >> /etc/pacman.conf
-            pacman -Sy --noconfirm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ffmpeg-custom
+          - package: cactus-bin
+          - package: llama.cpp-gfx906
+            free-disk: true
             
-            rm -f /var/cache/pacman/pkg/*
-          done
+    uses: ./.github/workflows/makepkg.yml
+    with:
+      package: ${{ matrix.package }}
+      free-disk: ${{ matrix.free-disk || false }}
+
+  aocl-blis-zen5:
+    uses: ./.github/workflows/makepkg.yml
+    with:
+      package: aocl-blis-zen5
+
+  llama-cpp-zen5:
+    needs: aocl-blis-zen5
+    uses: ./.github/workflows/makepkg.yml
+    with:
+      package: llama.cpp-zen5
+      deps: aocl-blis-zen5
+
+  publish:
+    needs: [build, aocl-blis-zen5, llama-cpp-zen5]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    permissions:
+      contents: write
+    steps:
+      - name: Prepare System
+        run: pacman -Syu --noconfirm github-cli
+
+      - name: Download Packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pkg-*
+          path: out
+          merge-multiple: true
 
       - name: Create Repo Database
         run: |
           cd out
+          repo-add archpackages.db.tar.zst *.pkg.tar.zst
           rm archpackages.db archpackages.files
           cp archpackages.db.tar.zst archpackages.db
           cp archpackages.files.tar.zst archpackages.files
@@ -70,4 +71,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete repo --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
-          gh release create repo out/* --title "Package Repo" --notes "Built from ${GITHUB_SHA}" --repo "$GITHUB_REPOSITORY"
+          gh release create repo out/* --target "$GITHUB_SHA" --title "Package Repo" --notes "Built from ${GITHUB_SHA}" --repo "$GITHUB_REPOSITORY"
